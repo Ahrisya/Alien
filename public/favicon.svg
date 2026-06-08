@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="UFO">
+  <defs>
+    <radialGradient id="beam" cx="50%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#b9f4ff" stop-opacity=".72"/>
+      <stop offset=".55" stop-color="#5dd7ff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#5dd7ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dome" x1="20" x2="44" y1="11" y2="32">
+      <stop offset="0" stop-color="#e9fbff"/>
+      <stop offset=".45" stop-color="#8ee7ff"/>
+      <stop offset="1" stop-color="#1b5d82"/>
+    </linearGradient>
+    <linearGradient id="hull" x1="8" x2="56" y1="27" y2="42">
+      <stop offset="0" stop-color="#38424d"/>
+      <stop offset=".18" stop-color="#b8c5ce"/>
+      <stop offset=".5" stop-color="#eef6f8"/>
+      <stop offset=".82" stop-color="#6c7680"/>
+      <stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="10" x2="54" y1="35" y2="46">
+      <stop offset="0" stop-color="#11141a"/>
+      <stop offset=".45" stop-color="#596473"/>
+      <stop offset="1" stop-color="#05070a"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#030712"/>
+  <path d="M24 39h16l8 20H16z" fill="url(#beam)" opacity=".72"/>
+  <path d="M22 29c1-10 7-17 14-17s12 7 13 17z" fill="url(#dome)" filter="url(#glow)"/>
+  <path d="M8 32c5-7 43-7 48 0 3 4-7 11-24 11S5 36 8 32z" fill="url(#hull)"/>
+  <path d="M11 35c9 5 33 5 42 0-2 7-12 12-21 12S13 42 11 35z" fill="url(#rim)"/>
+  <g filter="url(#glow)">
+    <circle cx="18" cy="36" r="2" fill="#ffcf5a"/>
+    <circle cx="28" cy="38" r="2.2" fill="#79f0ff"/>
+    <circle cx="38" cy="38" r="2.2" fill="#ff5573"/>
+    <circle cx="48" cy="36" r="2" fill="#ffcf5a"/>
+  </g>
+  <path d="M24 24c3-6 11-8 17-3" fill="none" stroke="#fff" stroke-linecap="round" stroke-opacity=".58" stroke-width="2"/>
+</svg>
