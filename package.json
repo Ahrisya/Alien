@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "wrangler pages dev dist"
+    "preview": "pnpm build && wrangler dev --config dist/server/wrangler.json",
+    "deploy": "pnpm build && wrangler deploy --config dist/server/wrangler.json"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.6.1",
