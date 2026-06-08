@@ -1,0 +1,1168 @@
+---
+const title = "宇宙信号";
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="一次面向深空的信号发送模拟。" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <canvas id="starfield" aria-hidden="true"></canvas>
+    <div class="cosmic-haze" aria-hidden="true"></div>
+
+    <main class="station" aria-label="深空信号控制台">
+      <section class="metrics" aria-live="polite">
+        <strong id="clickCount">0</strong>
+        <span class="metric-copy">signals from</span>
+        <strong id="locationCount">0</strong>
+        <span class="metric-copy">locations</span>
+      </section>
+
+      <section class="globe-stage" aria-label="全球信号位置">
+        <canvas id="earthCanvas"></canvas>
+        <div class="globe-vignette" aria-hidden="true"></div>
+      </section>
+
+      <button id="signalButton" class="signal-button" type="button" aria-label="发送信号">
+        <span class="button-core" aria-hidden="true"></span>
+      </button>
+    </main>
+
+    <script>
+      import * as THREE from "three";
+
+      const starCanvas = document.querySelector("#starfield");
+      const starContext = starCanvas instanceof HTMLCanvasElement ? starCanvas.getContext("2d") : null;
+      const earthCanvas = document.querySelector("#earthCanvas");
+      const locationCount = document.querySelector("#locationCount");
+      const clickCount = document.querySelector("#clickCount");
+      const signalButton = document.querySelector("#signalButton");
+      const globeStage = document.querySelector(".globe-stage");
+
+      const numberFormat = new Intl.NumberFormat("zh-CN");
+      const stars = [];
+      const dust = [];
+      const signalBursts = [];
+      const signalMeshes = [];
+      const cityGlowMeshes = [];
+      const cityPoints = [
+        [40.7128, -74.006], [34.0522, -118.2437], [37.7749, -122.4194], [19.4326, -99.1332],
+        [-23.5505, -46.6333], [-34.6037, -58.3816], [51.5072, -0.1276], [48.8566, 2.3522],
+        [52.52, 13.405], [55.7558, 37.6173], [30.0444, 31.2357], [6.5244, 3.3792],
+        [-1.2921, 36.8219], [-26.2041, 28.0473], [25.2048, 55.2708], [28.6139, 77.209],
+        [13.7563, 100.5018], [1.3521, 103.8198], [31.2304, 121.4737], [39.9042, 116.4074],
+        [35.6762, 139.6503], [37.5665, 126.978], [-33.8688, 151.2093], [-37.8136, 144.9631]
+      ];
+      const EARTH_RADIUS = 1.72;
+      const CLOUD_RADIUS = 1.748;
+      const ATMOSPHERE_RADIUS = 1.785;
+      const CITY_RADIUS = 1.724;
+      const SIGNAL_RADIUS = 1.728;
+      const BURST_RADIUS = 1.731;
+
+      let width = 0;
+      let height = 0;
+      let deviceScale = 1;
+      let renderer;
+      let scene;
+      let camera;
+      let earthGroup;
+      let earthMesh;
+      let cloudsMesh;
+      let atmosphereMesh;
+      let signalGroup;
+      let cityGroup;
+      let lastFrameTime = 0;
+      let globeFocusAnimation = null;
+      let autoRotatePausedUntil = 0;
+
+      function setStats(stats) {
+        if (locationCount) locationCount.textContent = numberFormat.format(stats.totalLocations ?? 0);
+        if (clickCount) clickCount.textContent = numberFormat.format(stats.totalClicks ?? 0);
+        renderSignals(Array.isArray(stats.signals) ? stats.signals : [], stats.lastSignalAt);
+      }
+
+      async function loadStats() {
+        const response = await fetch("/api/signal");
+        if (!response.ok) return;
+        setStats(await response.json());
+      }
+
+      function getCurrentLocation() {
+        return new Promise((resolve, reject) => {
+          if (!("geolocation" in navigator)) {
+            reject(new Error("Geolocation is not available."));
+            return;
+          }
+
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              resolve({
+                accuracy: position.coords.accuracy,
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude
+              });
+            },
+            reject,
+            {
+              enableHighAccuracy: true,
+              maximumAge: 60000,
+              timeout: 12000
+            }
+          );
+        });
+      }
+
+      function latLongToVector3(latitude, longitude, radius) {
+        const phi = THREE.MathUtils.degToRad(90 - latitude);
+        const theta = THREE.MathUtils.degToRad(longitude + 180);
+        return new THREE.Vector3(
+          -(radius * Math.sin(phi) * Math.cos(theta)),
+          radius * Math.cos(phi),
+          radius * Math.sin(phi) * Math.sin(theta)
+        );
+      }
+
+      function placeOnGlobeSurface(mesh, latitude, longitude, radius) {
+        const position = latLongToVector3(latitude, longitude, radius);
+        mesh.position.copy(position);
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), position.clone().normalize());
+      }
+
+      function forwardAngleDelta(from, to) {
+        const fullTurn = Math.PI * 2;
+        return ((to - from) % fullTurn + fullTurn) % fullTurn;
+      }
+
+      function easeInOutCubic(progress) {
+        return progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      }
+
+      function focusGlobeOnLocation(latitude, longitude) {
+        if (!earthGroup) return;
+
+        const localPoint = latLongToVector3(latitude, longitude, 1);
+        const tiltedPoint = localPoint.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), earthGroup.rotation.z);
+        const targetRotationY = Math.atan2(-tiltedPoint.x, tiltedPoint.z);
+        const startRotationY = earthGroup.rotation.y;
+        const deltaRotationY = forwardAngleDelta(startRotationY, targetRotationY);
+        const now = performance.now();
+
+        globeFocusAnimation = {
+          deltaRotationY,
+          duration: 850,
+          start: now,
+          startRotationY
+        };
+        autoRotatePausedUntil = now + 2300;
+      }
+
+      function createFallbackEarthTexture() {
+        const textureWidth = 1024;
+        const textureHeight = 512;
+        const textureCanvas = document.createElement("canvas");
+        const context = textureCanvas.getContext("2d");
+        textureCanvas.width = textureWidth;
+        textureCanvas.height = textureHeight;
+
+        if (!context) return null;
+
+        const ocean = context.createLinearGradient(0, 0, textureWidth, textureHeight);
+        ocean.addColorStop(0, "#1c629d");
+        ocean.addColorStop(0.5, "#0b3b74");
+        ocean.addColorStop(1, "#021027");
+        context.fillStyle = ocean;
+        context.fillRect(0, 0, textureWidth, textureHeight);
+
+        context.fillStyle = "rgba(80, 151, 104, 0.9)";
+        for (let index = 0; index < 18; index += 1) {
+          const x = Math.random() * textureWidth;
+          const y = Math.random() * textureHeight;
+          const radius = Math.random() * 70 + 34;
+          context.beginPath();
+          context.ellipse(x, y, radius * 1.6, radius, Math.random() * Math.PI, 0, Math.PI * 2);
+          context.fill();
+        }
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        return texture;
+      }
+
+      function loadEarthTexture() {
+        const fallbackTexture = createFallbackEarthTexture();
+        const loader = new THREE.TextureLoader();
+        const texture = loader.load(
+          "/textures/earth-blue-marble.png",
+          (loadedTexture) => {
+            loadedTexture.colorSpace = THREE.SRGBColorSpace;
+            loadedTexture.anisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? 8;
+            loadedTexture.needsUpdate = true;
+          },
+          undefined,
+          () => {
+            if (earthMesh?.material) {
+              earthMesh.material.map = fallbackTexture;
+              earthMesh.material.needsUpdate = true;
+            }
+          }
+        );
+
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 8;
+        return texture;
+      }
+
+      function createCloudTexture() {
+        const textureWidth = 1024;
+        const textureHeight = 512;
+        const textureCanvas = document.createElement("canvas");
+        const context = textureCanvas.getContext("2d");
+        textureCanvas.width = textureWidth;
+        textureCanvas.height = textureHeight;
+
+        if (!context) return null;
+
+        context.clearRect(0, 0, textureWidth, textureHeight);
+        for (let index = 0; index < 92; index += 1) {
+          const x = Math.random() * textureWidth;
+          const y = Math.random() * textureHeight;
+          const radiusX = Math.random() * 80 + 34;
+          const radiusY = Math.random() * 18 + 8;
+          const gradient = context.createRadialGradient(x, y, 0, x, y, radiusX);
+          gradient.addColorStop(0, "rgba(255, 255, 255, 0.28)");
+          gradient.addColorStop(0.55, "rgba(190, 220, 255, 0.11)");
+          gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+          context.fillStyle = gradient;
+          context.save();
+          context.translate(x, y);
+          context.scale(1, radiusY / radiusX);
+          context.beginPath();
+          context.arc(0, 0, radiusX, 0, Math.PI * 2);
+          context.fill();
+          context.restore();
+        }
+
+        return new THREE.CanvasTexture(textureCanvas);
+      }
+
+      function createSpriteTexture(color, core = "#fff4ba") {
+        const size = 128;
+        const textureCanvas = document.createElement("canvas");
+        const context = textureCanvas.getContext("2d");
+        textureCanvas.width = size;
+        textureCanvas.height = size;
+
+        if (!context) return null;
+
+        const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+        gradient.addColorStop(0, core);
+        gradient.addColorStop(0.16, color);
+        gradient.addColorStop(0.38, color.replace("1)", "0.38)"));
+        gradient.addColorStop(1, color.replace("1)", "0)"));
+        context.fillStyle = gradient;
+        context.beginPath();
+        context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        context.fill();
+
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        return texture;
+      }
+
+      function createSurfaceGlow(latitude, longitude, radius, size, material, baseScale, phase = 0) {
+        const glow = new THREE.Mesh(new THREE.PlaneGeometry(size, size), material);
+        placeOnGlobeSurface(glow, latitude, longitude, radius);
+        glow.userData.baseScale = baseScale;
+        glow.userData.baseOpacity = material.opacity;
+        glow.userData.phase = phase;
+        glow.userData.surfaceGlow = true;
+        return glow;
+      }
+
+      function initEarth() {
+        if (!(earthCanvas instanceof HTMLCanvasElement)) return;
+
+        renderer = new THREE.WebGLRenderer({
+          alpha: true,
+          antialias: true,
+          canvas: earthCanvas,
+          powerPreference: "high-performance"
+        });
+        renderer.setClearColor(0x000000, 0);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+        camera.position.set(0, 0.04, 6.35);
+
+        earthGroup = new THREE.Group();
+        earthGroup.rotation.y = THREE.MathUtils.degToRad(-86);
+        earthGroup.rotation.z = THREE.MathUtils.degToRad(-12);
+        scene.add(earthGroup);
+
+        const earthTexture = loadEarthTexture();
+        const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS, 128, 128);
+        const earthMaterial = new THREE.MeshStandardMaterial({
+          map: earthTexture,
+          metalness: 0.02,
+          roughness: 0.92
+        });
+        earthMesh = new THREE.Mesh(earthGeometry, earthMaterial);
+        earthGroup.add(earthMesh);
+
+        const cloudsTexture = createCloudTexture();
+        cloudsMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(CLOUD_RADIUS, 128, 128),
+          new THREE.MeshBasicMaterial({
+            map: cloudsTexture,
+            opacity: 0.26,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+          })
+        );
+        earthGroup.add(cloudsMesh);
+
+        atmosphereMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(ATMOSPHERE_RADIUS, 128, 128),
+          new THREE.MeshBasicMaterial({
+            color: 0x54c7ff,
+            opacity: 0.065,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide
+          })
+        );
+        earthGroup.add(atmosphereMesh);
+
+        signalGroup = new THREE.Group();
+        earthGroup.add(signalGroup);
+
+        cityGroup = new THREE.Group();
+        const cityCoreGeometry = new THREE.CircleGeometry(0.012, 18);
+        const cityCoreMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffb15b,
+          opacity: 0.92,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: true,
+          depthWrite: false,
+          side: THREE.DoubleSide
+        });
+        const cityGlowTexture = createSpriteTexture("rgba(255, 163, 66, 1)");
+        const cityGlowMaterial = new THREE.MeshBasicMaterial({
+          map: cityGlowTexture,
+          opacity: 0.42,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: true,
+          depthWrite: false,
+          side: THREE.DoubleSide
+        });
+        for (const [latitude, longitude] of cityPoints) {
+          const cityGlow = createSurfaceGlow(
+            latitude,
+            longitude,
+            CITY_RADIUS + 0.001,
+            0.108,
+            cityGlowMaterial,
+            1,
+            Math.random() * Math.PI * 2
+          );
+          const cityCore = new THREE.Mesh(cityCoreGeometry, cityCoreMaterial);
+          placeOnGlobeSurface(cityCore, latitude, longitude, CITY_RADIUS + 0.002);
+          cityGroup.add(cityGlow, cityCore);
+          cityGlowMeshes.push(cityGlow);
+        }
+        earthGroup.add(cityGroup);
+
+        scene.add(new THREE.AmbientLight(0x426fa9, 0.62));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 3.45);
+        keyLight.position.set(-3.9, 2.45, 5.4);
+        scene.add(keyLight);
+        const rimLight = new THREE.DirectionalLight(0x46b7ff, 1.9);
+        rimLight.position.set(3.8, 0.8, -3.6);
+        scene.add(rimLight);
+
+        resizeEarth();
+      }
+
+      function renderSignals(signals, lastSignalAt) {
+        if (!signalGroup) return;
+
+        signalGroup.clear();
+        signalMeshes.length = 0;
+
+        const signalCoreGeometry = new THREE.CircleGeometry(0.018, 24);
+        const signalGlowTexture = createSpriteTexture("rgba(255, 47, 37, 1)");
+        for (const signal of signals) {
+          if (
+            typeof signal.latitude !== "number" ||
+            typeof signal.longitude !== "number" ||
+            !Number.isFinite(signal.latitude) ||
+            !Number.isFinite(signal.longitude)
+          ) {
+            continue;
+          }
+
+          const count = Number.isFinite(signal.signalCount) ? signal.signalCount : 1;
+          const baseScale = Math.min(1.85, 0.86 + Math.log(count + 1) * 0.18);
+          const glow = createSurfaceGlow(
+            signal.latitude,
+            signal.longitude,
+            SIGNAL_RADIUS,
+            0.19,
+            new THREE.MeshBasicMaterial({
+              map: signalGlowTexture,
+              opacity: signal.lastSignalAt === lastSignalAt ? 0.72 : 0.48,
+              transparent: true,
+              blending: THREE.AdditiveBlending,
+              depthTest: true,
+              depthWrite: false,
+              side: THREE.DoubleSide
+            }),
+            baseScale,
+            Math.random() * Math.PI * 2
+          );
+          glow.userData.recent = signal.lastSignalAt === lastSignalAt;
+          glow.userData.startedAt = performance.now();
+
+          const core = new THREE.Mesh(
+            signalCoreGeometry,
+            new THREE.MeshBasicMaterial({
+              color: 0xffd59b,
+              opacity: 0.9,
+              transparent: true,
+              blending: THREE.AdditiveBlending,
+              depthTest: true,
+              depthWrite: false,
+              side: THREE.DoubleSide
+            })
+          );
+          placeOnGlobeSurface(core, signal.latitude, signal.longitude, SIGNAL_RADIUS + 0.002);
+          core.scale.setScalar(Math.min(1.35, 0.72 + Math.log(count + 1) * 0.12));
+          signalGroup.add(glow, core);
+          signalMeshes.push(glow);
+
+          if (signal.lastSignalAt === lastSignalAt) {
+            addGlobeBurst(signal.latitude, signal.longitude);
+          }
+        }
+      }
+
+      function addGlobeBurst(latitude, longitude) {
+        if (!signalGroup) return;
+
+        const position = latLongToVector3(latitude, longitude, BURST_RADIUS);
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.04, 0.055, 48),
+          new THREE.MeshBasicMaterial({
+            color: 0xff3328,
+            transparent: true,
+            opacity: 0.82,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide
+          })
+        );
+        placeOnGlobeSurface(ring, latitude, longitude, BURST_RADIUS);
+        ring.userData.startedAt = performance.now();
+        ring.userData.burst = true;
+        signalGroup.add(ring);
+        signalMeshes.push(ring);
+      }
+
+      function resizeEarth() {
+        if (!renderer || !camera || !(globeStage instanceof HTMLElement)) return;
+
+        const rect = globeStage.getBoundingClientRect();
+        const renderWidth = Math.max(1, Math.floor(rect.width));
+        const renderHeight = Math.max(1, Math.floor(rect.height));
+        renderer.setSize(renderWidth, renderHeight, false);
+        camera.aspect = renderWidth / renderHeight;
+        camera.position.z = renderWidth < 520 ? 6.62 : 6.36;
+        camera.updateProjectionMatrix();
+      }
+
+      function updateEarth(now) {
+        if (!renderer || !scene || !camera || !earthGroup) return;
+
+        const delta = lastFrameTime ? Math.min(40, now - lastFrameTime) : 16.7;
+        lastFrameTime = now;
+
+        if (globeFocusAnimation) {
+          const progress = Math.min(1, (now - globeFocusAnimation.start) / globeFocusAnimation.duration);
+          earthGroup.rotation.y =
+            globeFocusAnimation.startRotationY + globeFocusAnimation.deltaRotationY * easeInOutCubic(progress);
+          if (progress >= 1) globeFocusAnimation = null;
+        } else if (now > autoRotatePausedUntil) {
+          earthGroup.rotation.y += delta * 0.00008;
+        }
+        if (cloudsMesh) cloudsMesh.rotation.y += delta * 0.000035;
+        if (atmosphereMesh) atmosphereMesh.rotation.y -= delta * 0.00002;
+
+        for (const glow of cityGlowMeshes) {
+          const wave = Math.sin(now * 0.0028 + glow.userData.phase) * 0.16 + 1;
+          glow.scale.setScalar(glow.userData.baseScale * wave);
+          glow.material.opacity = glow.userData.baseOpacity * (0.78 + (wave - 1) * 1.1);
+        }
+
+        for (let index = signalMeshes.length - 1; index >= 0; index -= 1) {
+          const mesh = signalMeshes[index];
+
+          if (mesh.userData.surfaceGlow) {
+            const pulse = Math.sin(now * 0.004 + mesh.userData.phase) * 0.2 + 1;
+            const recentBoost = mesh.userData.recent ? Math.max(0, 1 - (now - mesh.userData.startedAt) / 1800) : 0;
+            mesh.scale.setScalar(mesh.userData.baseScale * (pulse + recentBoost * 0.95));
+            mesh.material.opacity = mesh.userData.baseOpacity * (0.72 + (pulse - 1) * 0.9 + recentBoost * 0.7);
+            continue;
+          }
+
+          const progress = (now - mesh.userData.startedAt) / 1700;
+          if (progress >= 1) {
+            mesh.parent?.remove(mesh);
+            signalMeshes.splice(index, 1);
+            continue;
+          }
+
+          mesh.scale.setScalar(1 + progress * 10);
+          mesh.material.opacity = Math.max(0, 0.72 * (1 - progress));
+        }
+
+        renderer.render(scene, camera);
+      }
+
+      function addViewportSignalBurst() {
+        if (!(globeStage instanceof HTMLElement)) return;
+
+        const rect = globeStage.getBoundingClientRect();
+        signalBursts.push({
+          start: performance.now(),
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height * 0.55
+        });
+      }
+
+      async function sendSignal() {
+        if (!(signalButton instanceof HTMLButtonElement)) return;
+
+        signalButton.disabled = true;
+        document.body.classList.add("is-locating");
+
+        try {
+          const location = await getCurrentLocation();
+
+          document.body.classList.remove("is-locating");
+          document.body.classList.add("is-signaling");
+          focusGlobeOnLocation(location.latitude, location.longitude);
+          globeStage?.classList.remove("bursting");
+          window.requestAnimationFrame(() => globeStage?.classList.add("bursting"));
+          addViewportSignalBurst();
+
+          const response = await fetch("/api/signal", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              accuracy: location.accuracy,
+              latitude: location.latitude,
+              longitude: location.longitude
+            })
+          });
+
+          if (response.ok) {
+            setStats(await response.json());
+          }
+        } catch {
+          document.body.classList.add("location-failed");
+        } finally {
+          window.setTimeout(() => {
+            signalButton.disabled = false;
+            document.body.classList.remove("is-locating", "location-failed");
+            document.body.classList.remove("is-signaling");
+          }, 820);
+        }
+      }
+
+      function resizeCanvas() {
+        if (!starCanvas || !starContext) return;
+
+        deviceScale = Math.min(window.devicePixelRatio || 1, 2);
+        width = window.innerWidth;
+        height = window.innerHeight;
+        starCanvas.width = Math.floor(width * deviceScale);
+        starCanvas.height = Math.floor(height * deviceScale);
+        starCanvas.style.width = `${width}px`;
+        starCanvas.style.height = `${height}px`;
+        starContext.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+
+        const starCount = Math.round(Math.min(900, Math.max(280, (width * height) / 3100)));
+        const dustCount = Math.round(Math.min(150, Math.max(48, (width * height) / 15000)));
+        stars.length = 0;
+        dust.length = 0;
+
+        for (let index = 0; index < starCount; index += 1) {
+          const colorRoll = Math.random();
+          stars.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            radius: Math.random() * 1.8 + 0.16,
+            alpha: Math.random() * 0.72 + 0.2,
+            speed: Math.random() * 0.16 + 0.014,
+            drift: Math.random() * 0.1 - 0.05,
+            color:
+              colorRoll > 0.9
+                ? "255, 146, 211"
+                : colorRoll > 0.72
+                  ? "114, 232, 255"
+                  : colorRoll > 0.56
+                    ? "255, 231, 148"
+                    : "236, 248, 255"
+          });
+        }
+
+        for (let index = 0; index < dustCount; index += 1) {
+          dust.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            length: Math.random() * 96 + 38,
+            alpha: Math.random() * 0.2 + 0.04,
+            speed: Math.random() * 0.08 + 0.018,
+            angle: -0.72 + Math.random() * 0.18
+          });
+        }
+
+        resizeEarth();
+      }
+
+      function drawSignalBursts(now) {
+        if (!starContext) return;
+
+        for (let index = signalBursts.length - 1; index >= 0; index -= 1) {
+          const burst = signalBursts[index];
+          const progress = (now - burst.start) / 1850;
+
+          if (progress >= 1) {
+            signalBursts.splice(index, 1);
+            continue;
+          }
+
+          const beamHeight = height * (0.48 + progress * 0.74);
+          const glow = 1 - progress;
+          const gradient = starContext.createLinearGradient(burst.x, burst.y, burst.x, burst.y - beamHeight);
+          gradient.addColorStop(0, `rgba(255, 35, 30, ${0.44 * glow})`);
+          gradient.addColorStop(0.2, `rgba(255, 195, 90, ${0.36 * glow})`);
+          gradient.addColorStop(0.62, `rgba(108, 232, 255, ${0.22 * glow})`);
+          gradient.addColorStop(1, "rgba(255, 42, 42, 0)");
+
+          starContext.save();
+          starContext.globalCompositeOperation = "screen";
+          starContext.strokeStyle = gradient;
+          starContext.lineWidth = 18 + 58 * progress;
+          starContext.beginPath();
+          starContext.moveTo(burst.x, burst.y);
+          starContext.lineTo(burst.x + Math.sin(progress * Math.PI * 2) * 26, burst.y - beamHeight);
+          starContext.stroke();
+
+          starContext.strokeStyle = `rgba(255, 64, 58, ${0.34 * glow})`;
+          starContext.lineWidth = 2;
+          starContext.beginPath();
+          starContext.arc(burst.x, burst.y, 80 + progress * 460, 0, Math.PI * 2);
+          starContext.stroke();
+          starContext.restore();
+        }
+      }
+
+      function animate(now) {
+        if (!starContext) return;
+
+        starContext.clearRect(0, 0, width, height);
+
+        starContext.save();
+        starContext.globalCompositeOperation = "screen";
+
+        for (const particle of dust) {
+          particle.x += Math.cos(particle.angle) * particle.speed;
+          particle.y += Math.sin(particle.angle) * particle.speed;
+
+          if (particle.x < -particle.length) particle.x = width + particle.length;
+          if (particle.y < -particle.length) particle.y = height + particle.length;
+
+          const endX = particle.x + Math.cos(particle.angle) * particle.length;
+          const endY = particle.y + Math.sin(particle.angle) * particle.length;
+          const dustGradient = starContext.createLinearGradient(particle.x, particle.y, endX, endY);
+          dustGradient.addColorStop(0, "rgba(255, 255, 255, 0)");
+          dustGradient.addColorStop(0.45, `rgba(151, 236, 255, ${particle.alpha})`);
+          dustGradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+          starContext.strokeStyle = dustGradient;
+          starContext.lineWidth = 1;
+          starContext.beginPath();
+          starContext.moveTo(particle.x, particle.y);
+          starContext.lineTo(endX, endY);
+          starContext.stroke();
+        }
+
+        for (const star of stars) {
+          star.y += star.speed;
+          star.x += star.drift;
+
+          if (star.y > height + 4) star.y = -4;
+          if (star.x < -4) star.x = width + 4;
+          if (star.x > width + 4) star.x = -4;
+
+          const twinkle = Math.sin(now * 0.0015 + star.x) * 0.2 + 0.8;
+          starContext.fillStyle = `rgba(${star.color}, ${star.alpha * twinkle})`;
+          starContext.beginPath();
+          starContext.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+          starContext.fill();
+        }
+
+        drawSignalBursts(now);
+        starContext.restore();
+        updateEarth(now);
+        window.requestAnimationFrame(animate);
+      }
+
+      window.addEventListener("resize", resizeCanvas);
+      signalButton?.addEventListener("click", sendSignal);
+      initEarth();
+      resizeCanvas();
+      loadStats();
+      window.requestAnimationFrame(animate);
+    </script>
+  </body>
+</html>
+
+<style>
+  :root {
+    color-scheme: dark;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #050711;
+    color: #f7fbff;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    position: relative;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 50% 42%, rgba(24, 77, 139, 0.28), transparent 34%),
+      linear-gradient(180deg, rgba(2, 4, 14, 0.3), rgba(1, 2, 8, 0.88)),
+      url("/textures/orion-nebula-bg.jpg") center / cover fixed,
+      #050711;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 50% 40%, transparent 0 31%, rgba(0, 0, 0, 0.28) 60%, rgba(0, 0, 0, 0.76) 100%),
+      linear-gradient(90deg, rgba(0, 7, 22, 0.72), rgba(4, 8, 20, 0.18) 48%, rgba(4, 0, 12, 0.72));
+  }
+
+  #starfield {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.42;
+    mix-blend-mode: screen;
+  }
+
+  .cosmic-haze {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at 18% 52%, rgba(15, 138, 255, 0.14), transparent 31%),
+      radial-gradient(ellipse at 82% 42%, rgba(194, 54, 255, 0.12), transparent 35%),
+      linear-gradient(116deg, transparent 0 18%, rgba(38, 216, 255, 0.055) 33%, transparent 51%);
+    mix-blend-mode: screen;
+    opacity: 0.78;
+    animation: hazeDrift 24s ease-in-out infinite alternate;
+  }
+
+  .station {
+    position: relative;
+    z-index: 2;
+    width: min(96vw, 1180px);
+    min-height: 100svh;
+    display: grid;
+    grid-template-rows: auto auto auto;
+    align-content: center;
+    align-items: center;
+    justify-items: center;
+    row-gap: clamp(10px, 1.4vh, 18px);
+    padding: clamp(24px, 4vh, 40px) 20px clamp(26px, 5vh, 44px);
+  }
+
+  .metrics {
+    width: min(94vw, 920px);
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: clamp(9px, 1.6vw, 18px);
+    text-align: center;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .metric-copy {
+    color: rgba(211, 231, 255, 0.82);
+    font-size: clamp(0.85rem, 1.7vw, 1.34rem);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-shadow:
+      0 0 12px rgba(80, 177, 255, 0.5),
+      0 0 28px rgba(80, 177, 255, 0.22);
+  }
+
+  .metrics strong {
+    display: inline-block;
+    min-height: 0.95em;
+    min-width: 0.7em;
+    color: #ffffff;
+    font-size: clamp(4.2rem, 11vw, 8.6rem);
+    font-weight: 800;
+    line-height: 0.78;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    text-shadow:
+      0 0 14px rgba(255, 255, 255, 0.86),
+      0 0 30px rgba(104, 206, 255, 0.8),
+      0 0 70px rgba(53, 119, 255, 0.44);
+    -webkit-text-stroke: 1px rgba(188, 229, 255, 0.16);
+  }
+
+  .globe-stage {
+    position: relative;
+    width: min(86vw, 740px, calc(100svh - 286px));
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    align-self: center;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  #earthCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    filter:
+      drop-shadow(0 0 18px rgba(91, 195, 255, 0.24))
+      drop-shadow(0 0 54px rgba(37, 117, 255, 0.12));
+  }
+
+  .globe-vignette {
+    position: absolute;
+    inset: 5%;
+    border-radius: 50%;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 36% 30%, rgba(255, 255, 255, 0.065), transparent 23%),
+      radial-gradient(circle at 50% 50%, transparent 62%, rgba(86, 190, 255, 0.055) 70%, transparent 78%);
+    mix-blend-mode: screen;
+  }
+
+  .globe-stage.bursting #earthCanvas {
+    animation: globeFlash 820ms ease-out;
+  }
+
+  body.location-failed .signal-button {
+    animation: locationShake 260ms ease-in-out 2;
+  }
+
+  .signal-button {
+    position: relative;
+    isolation: isolate;
+    width: clamp(76px, 7.8vw, 96px);
+    height: clamp(76px, 7.8vw, 96px);
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(20, 22, 24, 0.95) 0 58%, transparent 59%),
+      conic-gradient(
+        from -42deg,
+        #050607 0deg,
+        #25292c 34deg,
+        #5d6468 62deg,
+        #141719 104deg,
+        #020303 156deg,
+        #343a3e 214deg,
+        #737b80 248deg,
+        #111417 305deg,
+        #050607 360deg
+      );
+    box-shadow:
+      0 18px 32px rgba(0, 0, 0, 0.62),
+      0 0 20px rgba(255, 28, 22, 0.18),
+      inset 0 2px 2px rgba(255, 255, 255, 0.18),
+      inset 0 -12px 16px rgba(0, 0, 0, 0.76);
+    transform: translateY(0);
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      filter 180ms ease;
+  }
+
+  .signal-button::before {
+    content: "";
+    position: absolute;
+    inset: 7px;
+    z-index: 0;
+    border-radius: inherit;
+    background:
+      radial-gradient(circle at 50% 50%, #171b1e 0 52%, #050607 100%);
+    box-shadow:
+      inset 0 7px 10px rgba(0, 0, 0, 0.78),
+      inset 0 -3px 7px rgba(255, 255, 255, 0.06);
+  }
+
+  .signal-button::after {
+    content: "";
+    position: absolute;
+    inset: auto 14% -11%;
+    z-index: -1;
+    height: 18%;
+    border-radius: inherit;
+    background: rgba(0, 0, 0, 0.48);
+    filter: blur(15px);
+    pointer-events: none;
+  }
+
+  .signal-button:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 22px 38px rgba(0, 0, 0, 0.64),
+      0 0 24px rgba(255, 38, 31, 0.24),
+      inset 0 2px 2px rgba(255, 255, 255, 0.2),
+      inset 0 -12px 16px rgba(0, 0, 0, 0.78);
+  }
+
+  .signal-button:active,
+  .signal-button:disabled {
+    transform: translateY(5px) scale(0.985);
+    filter: brightness(0.94);
+  }
+
+  .signal-button:disabled {
+    cursor: wait;
+  }
+
+  .button-core {
+    position: absolute;
+    inset: 11px;
+    z-index: 1;
+    display: block;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 54%, rgba(255, 55, 42, 0.9) 0 7%, transparent 8%),
+      radial-gradient(circle at 50% 48%, #f2241f 0 36%, #a3090e 62%, #4f0306 100%);
+    box-shadow:
+      0 0 18px rgba(255, 31, 26, 0.5),
+      0 6px 10px rgba(0, 0, 0, 0.54),
+      inset 0 5px 10px rgba(255, 74, 51, 0.17),
+      inset 0 -13px 22px rgba(40, 0, 0, 0.68);
+    overflow: hidden;
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      filter 180ms ease;
+  }
+
+  .button-core::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      repeating-linear-gradient(
+        92deg,
+        rgba(255, 105, 82, 0.045) 0 1px,
+        rgba(34, 0, 0, 0.075) 1px 2px,
+        transparent 2px 5px
+      ),
+      radial-gradient(circle at 50% 52%, transparent 0 44%, rgba(255, 92, 62, 0.1) 45% 47%, transparent 48% 100%);
+    mix-blend-mode: overlay;
+    opacity: 0.72;
+    pointer-events: none;
+  }
+
+  .button-core::after {
+    content: "";
+    position: absolute;
+    inset: 12%;
+    border: 1px solid rgba(255, 119, 87, 0.24);
+    border-radius: inherit;
+    box-shadow:
+      inset 0 0 22px rgba(255, 18, 14, 0.22),
+      0 0 18px rgba(255, 18, 14, 0.24);
+    pointer-events: none;
+  }
+
+  .signal-button:hover .button-core {
+    filter: saturate(1.04) brightness(1.05);
+  }
+
+  .signal-button:active .button-core,
+  .signal-button:disabled .button-core {
+    transform: translateY(4px) scale(0.985);
+    box-shadow:
+      0 0 16px rgba(255, 31, 26, 0.42),
+      0 4px 7px rgba(0, 0, 0, 0.5),
+      inset 0 8px 14px rgba(43, 0, 0, 0.5),
+      inset 0 -8px 15px rgba(18, 0, 0, 0.6);
+  }
+
+  body.is-signaling .station {
+    animation: stationFlash 820ms ease-out;
+  }
+
+  @keyframes hazeDrift {
+    from {
+      transform: translate3d(-1.5vw, -1vh, 0) scale(1.02);
+    }
+    to {
+      transform: translate3d(2vw, 1.5vh, 0) scale(1.08);
+    }
+  }
+
+  @keyframes globeFlash {
+    0%,
+    100% {
+      filter:
+        drop-shadow(0 0 18px rgba(91, 195, 255, 0.24))
+        drop-shadow(0 0 54px rgba(37, 117, 255, 0.12));
+    }
+    42% {
+      filter:
+        drop-shadow(0 0 22px rgba(255, 48, 40, 0.42))
+        drop-shadow(0 0 62px rgba(81, 210, 255, 0.2));
+    }
+  }
+
+  @keyframes locationShake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    35% {
+      transform: translateX(-5px);
+    }
+    70% {
+      transform: translateX(5px);
+    }
+  }
+
+  @keyframes stationFlash {
+    0%,
+    100% {
+      filter: none;
+    }
+    36% {
+      filter: drop-shadow(0 0 46px rgba(116, 238, 255, 0.55));
+    }
+  }
+
+  @media (max-width: 700px) {
+    html,
+    body {
+      overflow: auto;
+    }
+
+    .station {
+      width: 100vw;
+      min-height: 100svh;
+      grid-template-rows: auto auto auto;
+      row-gap: 10px;
+      padding: 25px 14px 28px;
+    }
+
+    .metrics {
+      width: min(94vw, 430px);
+      flex-wrap: wrap;
+      gap: 6px 9px;
+      line-height: 0.95;
+    }
+
+    .metric-copy {
+      font-size: clamp(0.72rem, 3vw, 0.92rem);
+    }
+
+    .metrics strong {
+      font-size: clamp(3.2rem, 16vw, 4.75rem);
+    }
+
+    .globe-stage {
+      width: min(calc(100vw - 28px), 500px, calc(100svh - 246px));
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+
+    .signal-button {
+      width: clamp(72px, 21vw, 88px);
+      height: clamp(72px, 21vw, 88px);
+    }
+
+    .button-core {
+      inset: 10px;
+    }
+  }
+
+  @media (max-height: 720px) and (min-width: 701px) {
+    .station {
+      grid-template-rows: auto auto auto;
+      padding-top: 18px;
+      padding-bottom: 22px;
+    }
+
+    .globe-stage {
+      width: min(62vh, 680px, calc(100svh - 284px));
+    }
+
+    .signal-button {
+      width: 78px;
+      height: 78px;
+    }
+
+    .button-core {
+      inset: 10px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>

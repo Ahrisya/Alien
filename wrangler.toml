@@ -1,0 +1,9 @@
+name = "alien-signal"
+compatibility_date = "2026-06-08"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "alien-signal"
+database_id = "479192c6-c2a6-4542-9d79-b0923e909fab"
+migrations_dir = "migrations"

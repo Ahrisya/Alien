@@ -1,0 +1,21 @@
+{
+  "name": "alien-signal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "wrangler pages dev dist"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^13.6.1",
+    "astro": "latest",
+    "three": "^0.184.0",
+    "wrangler": "^4.98.0"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  },
+  "packageManager": "pnpm@10.7.0"
+}

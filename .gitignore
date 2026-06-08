@@ -1,0 +1,33 @@
+node_modules/
+
+# Build output
+dist/
+.astro/
+
+# Cloudflare / Wrangler local state
+.wrangler/
+.dev.vars
+
+# Package manager cache
+.pnpm-store/
+
+# Local data used before D1
+data/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
