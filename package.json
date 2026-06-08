@@ -7,7 +7,9 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "pnpm build && wrangler dev --config dist/server/wrangler.json",
-    "deploy": "pnpm build && wrangler deploy --config dist/server/wrangler.json"
+    "deploy": "pnpm build && wrangler deploy --config dist/server/wrangler.json",
+    "db:migrate": "wrangler d1 migrations apply alien-signal --local",
+    "db:migrate:remote": "wrangler d1 migrations apply alien-signal --remote"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.6.1",

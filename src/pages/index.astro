@@ -14,6 +14,20 @@ const title = "Sir, this way.";
   <body>
     <canvas id="starfield" aria-hidden="true"></canvas>
     <div class="cosmic-haze" aria-hidden="true"></div>
+    <aside class="alert-ticker" aria-label="Emergency broadcast">
+      <div class="ticker-track" aria-hidden="true">
+        <span>Do not respond! Do not respond! Do not respond!</span>
+        <span>不要回答！不要回答！不要回答</span>
+        <span>Do not respond! Do not respond! Do not respond!</span>
+        <span>不要回答！不要回答！不要回答</span>
+        <span>Do not respond! Do not respond! Do not respond!</span>
+        <span>不要回答！不要回答！不要回答</span>
+        <span>Do not respond! Do not respond! Do not respond!</span>
+        <span>不要回答！不要回答！不要回答</span>
+        <span>Do not respond! Do not respond! Do not respond!</span>
+        <span>不要回答！不要回答！不要回答</span>
+      </div>
+    </aside>
 
     <main class="station" aria-label="深空信号控制台">
       <section class="metrics" aria-live="polite">
@@ -29,7 +43,10 @@ const title = "Sir, this way.";
       </section>
 
       <button id="signalButton" class="signal-button" type="button" aria-label="发送信号">
-        <span class="button-core" aria-hidden="true"></span>
+        <span class="button-core" aria-hidden="true">
+          <span class="button-arrow"></span>
+          <span class="button-text">Sir, this way.</span>
+        </span>
       </button>
     </main>
 
@@ -687,6 +704,7 @@ const title = "Sir, this way.";
 
 <style>
   :root {
+    --ticker-height: 38px;
     color-scheme: dark;
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -751,6 +769,69 @@ const title = "Sir, this way.";
     animation: hazeDrift 24s ease-in-out infinite alternate;
   }
 
+  .alert-ticker {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 4;
+    height: var(--ticker-height);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    border-top: 1px solid rgba(255, 72, 72, 0.42);
+    background:
+      linear-gradient(90deg, rgba(255, 40, 40, 0.16), transparent 18% 82%, rgba(255, 40, 40, 0.16)),
+      linear-gradient(180deg, rgba(5, 11, 20, 0.88), rgba(2, 4, 10, 0.94));
+    box-shadow:
+      0 -10px 28px rgba(0, 0, 0, 0.5),
+      0 0 24px rgba(255, 38, 38, 0.14);
+    pointer-events: none;
+  }
+
+  .alert-ticker::before,
+  .alert-ticker::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    width: min(14vw, 180px);
+    pointer-events: none;
+  }
+
+  .alert-ticker::before {
+    left: 0;
+    background: linear-gradient(90deg, rgba(2, 4, 10, 0.98), rgba(2, 4, 10, 0));
+  }
+
+  .alert-ticker::after {
+    right: 0;
+    background: linear-gradient(270deg, rgba(2, 4, 10, 0.98), rgba(2, 4, 10, 0));
+  }
+
+  .ticker-track {
+    display: flex;
+    width: max-content;
+    min-width: 200%;
+    animation: tickerScroll 24s linear infinite;
+    will-change: transform;
+  }
+
+  .ticker-track span {
+    flex: 0 0 auto;
+    padding-right: clamp(34px, 5vw, 78px);
+    color: rgba(255, 235, 235, 0.94);
+    font-family:
+      "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
+    font-size: clamp(0.78rem, 1.5vw, 0.98rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    text-shadow:
+      0 0 8px rgba(255, 59, 59, 0.74),
+      0 0 18px rgba(93, 218, 255, 0.22);
+  }
+
   .station {
     position: relative;
     z-index: 2;
@@ -762,7 +843,7 @@ const title = "Sir, this way.";
     align-items: center;
     justify-items: center;
     row-gap: clamp(10px, 1.4vh, 18px);
-    padding: clamp(24px, 4vh, 40px) 20px clamp(26px, 5vh, 44px);
+    padding: clamp(24px, 4vh, 40px) 20px calc(var(--ticker-height) + clamp(58px, 7vh, 86px));
   }
 
   .metrics {
@@ -791,7 +872,7 @@ const title = "Sir, this way.";
     min-height: 0.95em;
     min-width: 0.7em;
     color: #ffffff;
-    font-size: clamp(4.2rem, 11vw, 8.6rem);
+    font-size: clamp(3.55rem, 8.6vw, 6.9rem);
     font-weight: 800;
     line-height: 0.78;
     font-variant-numeric: tabular-nums;
@@ -812,6 +893,7 @@ const title = "Sir, this way.";
     align-self: center;
     margin-top: 0;
     margin-bottom: 0;
+    transform: translateY(clamp(-18px, -1.8vh, -10px));
   }
 
   #earthCanvas {
@@ -845,31 +927,31 @@ const title = "Sir, this way.";
   .signal-button {
     position: relative;
     isolation: isolate;
-    width: clamp(76px, 7.8vw, 96px);
-    height: clamp(76px, 7.8vw, 96px);
+    width: clamp(142px, 13vw, 172px);
+    height: clamp(54px, 5vw, 62px);
     border: 0;
-    border-radius: 50%;
+    border-radius: 999px;
     cursor: pointer;
     padding: 0;
     background:
-      radial-gradient(circle at 50% 50%, rgba(20, 22, 24, 0.95) 0 58%, transparent 59%),
+      radial-gradient(ellipse at 50% 44%, rgba(147, 236, 255, 0.15) 0 28%, transparent 50%),
       conic-gradient(
         from -42deg,
-        #050607 0deg,
-        #25292c 34deg,
-        #5d6468 62deg,
-        #141719 104deg,
-        #020303 156deg,
-        #343a3e 214deg,
-        #737b80 248deg,
-        #111417 305deg,
-        #050607 360deg
+        #05080b 0deg,
+        #26313a 36deg,
+        #7e8d99 72deg,
+        #161d23 118deg,
+        #020406 168deg,
+        #34424c 220deg,
+        #a0b0ba 258deg,
+        #111820 312deg,
+        #05080b 360deg
       );
     box-shadow:
       0 18px 32px rgba(0, 0, 0, 0.62),
-      0 0 20px rgba(255, 28, 22, 0.18),
-      inset 0 2px 2px rgba(255, 255, 255, 0.18),
-      inset 0 -12px 16px rgba(0, 0, 0, 0.76);
+      0 0 22px rgba(107, 221, 255, 0.12),
+      inset 0 1px 1px rgba(255, 255, 255, 0.26),
+      inset 0 -10px 14px rgba(0, 0, 0, 0.72);
     transform: translateY(0);
     transition:
       transform 180ms ease,
@@ -880,14 +962,15 @@ const title = "Sir, this way.";
   .signal-button::before {
     content: "";
     position: absolute;
-    inset: 7px;
+    inset: 6px;
     z-index: 0;
     border-radius: inherit;
     background:
-      radial-gradient(circle at 50% 50%, #171b1e 0 52%, #050607 100%);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 42%),
+      radial-gradient(ellipse at 50% 50%, #17232b 0 48%, #05080b 100%);
     box-shadow:
-      inset 0 7px 10px rgba(0, 0, 0, 0.78),
-      inset 0 -3px 7px rgba(255, 255, 255, 0.06);
+      inset 0 6px 10px rgba(0, 0, 0, 0.72),
+      inset 0 -2px 7px rgba(174, 244, 255, 0.07);
   }
 
   .signal-button::after {
@@ -898,7 +981,7 @@ const title = "Sir, this way.";
     height: 18%;
     border-radius: inherit;
     background: rgba(0, 0, 0, 0.48);
-    filter: blur(15px);
+    filter: blur(12px);
     pointer-events: none;
   }
 
@@ -906,7 +989,7 @@ const title = "Sir, this way.";
     transform: translateY(-2px);
     box-shadow:
       0 22px 38px rgba(0, 0, 0, 0.64),
-      0 0 24px rgba(255, 38, 31, 0.24),
+      0 0 30px rgba(118, 229, 255, 0.22),
       inset 0 2px 2px rgba(255, 255, 255, 0.2),
       inset 0 -12px 16px rgba(0, 0, 0, 0.78);
   }
@@ -923,19 +1006,21 @@ const title = "Sir, this way.";
 
   .button-core {
     position: absolute;
-    inset: 11px;
+    inset: 10px 13px;
     z-index: 1;
-    display: block;
-    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
     background:
-      radial-gradient(circle at 50% 54%, rgba(255, 55, 42, 0.9) 0 7%, transparent 8%),
-      radial-gradient(circle at 50% 48%, #f2241f 0 36%, #a3090e 62%, #4f0306 100%);
+      radial-gradient(ellipse at 50% 50%, rgba(217, 251, 255, 0.28) 0 15%, rgba(91, 220, 255, 0.12) 36%, transparent 62%),
+      linear-gradient(180deg, rgba(216, 248, 255, 0.12), rgba(22, 38, 47, 0.2)),
+      #081017;
     box-shadow:
-      0 0 18px rgba(255, 31, 26, 0.5),
+      0 0 18px rgba(91, 220, 255, 0.26),
       0 6px 10px rgba(0, 0, 0, 0.54),
-      inset 0 5px 10px rgba(255, 74, 51, 0.17),
-      inset 0 -13px 22px rgba(40, 0, 0, 0.68);
-    overflow: hidden;
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      inset 0 -10px 18px rgba(0, 0, 0, 0.64);
+    overflow: visible;
     transition:
       transform 180ms ease,
       box-shadow 180ms ease,
@@ -950,11 +1035,11 @@ const title = "Sir, this way.";
     background:
       repeating-linear-gradient(
         92deg,
-        rgba(255, 105, 82, 0.045) 0 1px,
-        rgba(34, 0, 0, 0.075) 1px 2px,
+        rgba(142, 237, 255, 0.045) 0 1px,
+        rgba(0, 17, 24, 0.085) 1px 2px,
         transparent 2px 5px
       ),
-      radial-gradient(circle at 50% 52%, transparent 0 44%, rgba(255, 92, 62, 0.1) 45% 47%, transparent 48% 100%);
+      radial-gradient(ellipse at 50% 52%, transparent 0 44%, rgba(142, 237, 255, 0.12) 45% 47%, transparent 48% 100%);
     mix-blend-mode: overlay;
     opacity: 0.72;
     pointer-events: none;
@@ -963,27 +1048,67 @@ const title = "Sir, this way.";
   .button-core::after {
     content: "";
     position: absolute;
-    inset: 12%;
-    border: 1px solid rgba(255, 119, 87, 0.24);
+    inset: 0;
+    border: 1px solid rgba(155, 238, 255, 0.22);
     border-radius: inherit;
     box-shadow:
-      inset 0 0 22px rgba(255, 18, 14, 0.22),
-      0 0 18px rgba(255, 18, 14, 0.24);
+      inset 0 0 18px rgba(107, 221, 255, 0.16),
+      0 0 14px rgba(107, 221, 255, 0.18);
     pointer-events: none;
   }
 
+  .button-arrow {
+    position: absolute;
+    left: 50%;
+    top: -29px;
+    width: 1px;
+    height: 27px;
+    background: linear-gradient(180deg, rgba(175, 244, 255, 0.78), rgba(175, 244, 255, 0.1));
+    transform: translateX(-50%);
+    filter: drop-shadow(0 0 8px rgba(107, 221, 255, 0.72));
+    pointer-events: none;
+  }
+
+  .button-arrow::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -1px;
+    width: 8px;
+    height: 8px;
+    border-top: 1px solid rgba(201, 250, 255, 0.84);
+    border-left: 1px solid rgba(201, 250, 255, 0.84);
+    transform: translateX(-50%) rotate(45deg);
+    transform-origin: center;
+  }
+
+  .button-text {
+    position: relative;
+    z-index: 1;
+    color: rgba(233, 252, 255, 0.94);
+    font-size: clamp(0.66rem, 0.78vw, 0.78rem);
+    font-weight: 750;
+    line-height: 1;
+    letter-spacing: 0;
+    text-transform: none;
+    text-shadow:
+      0 0 8px rgba(151, 234, 255, 0.7),
+      0 0 20px rgba(151, 234, 255, 0.25);
+    white-space: nowrap;
+  }
+
   .signal-button:hover .button-core {
-    filter: saturate(1.04) brightness(1.05);
+    filter: saturate(1.06) brightness(1.08);
   }
 
   .signal-button:active .button-core,
   .signal-button:disabled .button-core {
     transform: translateY(4px) scale(0.985);
     box-shadow:
-      0 0 16px rgba(255, 31, 26, 0.42),
+      0 0 14px rgba(107, 221, 255, 0.24),
       0 4px 7px rgba(0, 0, 0, 0.5),
-      inset 0 8px 14px rgba(43, 0, 0, 0.5),
-      inset 0 -8px 15px rgba(18, 0, 0, 0.6);
+      inset 0 7px 12px rgba(0, 12, 18, 0.5),
+      inset 0 -7px 14px rgba(0, 0, 0, 0.62);
   }
 
   body.is-signaling .station {
@@ -1036,6 +1161,15 @@ const title = "Sir, this way.";
     }
   }
 
+  @keyframes tickerScroll {
+    from {
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      transform: translate3d(-50%, 0, 0);
+    }
+  }
+
   @media (max-width: 700px) {
     html,
     body {
@@ -1047,7 +1181,7 @@ const title = "Sir, this way.";
       min-height: 100svh;
       grid-template-rows: auto auto auto;
       row-gap: 10px;
-      padding: 25px 14px 28px;
+      padding: 22px 14px calc(var(--ticker-height) + 50px);
     }
 
     .metrics {
@@ -1062,22 +1196,32 @@ const title = "Sir, this way.";
     }
 
     .metrics strong {
-      font-size: clamp(3.2rem, 16vw, 4.75rem);
+      font-size: clamp(2.75rem, 13.5vw, 3.85rem);
     }
 
     .globe-stage {
       width: min(calc(100vw - 28px), 500px, calc(100svh - 246px));
       margin-top: 0;
       margin-bottom: 0;
+      transform: translateY(-8px);
     }
 
     .signal-button {
-      width: clamp(72px, 21vw, 88px);
-      height: clamp(72px, 21vw, 88px);
+      width: clamp(136px, 42vw, 158px);
+      height: 52px;
     }
 
     .button-core {
-      inset: 10px;
+      inset: 9px 12px;
+    }
+
+    .button-arrow {
+      top: -24px;
+      height: 22px;
+    }
+
+    .button-text {
+      font-size: 0.66rem;
     }
   }
 
@@ -1085,7 +1229,7 @@ const title = "Sir, this way.";
     .station {
       grid-template-rows: auto auto auto;
       padding-top: 18px;
-      padding-bottom: 22px;
+      padding-bottom: calc(var(--ticker-height) + 52px);
     }
 
     .globe-stage {
@@ -1093,12 +1237,12 @@ const title = "Sir, this way.";
     }
 
     .signal-button {
-      width: 78px;
-      height: 78px;
+      width: 138px;
+      height: 50px;
     }
 
     .button-core {
-      inset: 10px;
+      inset: 9px 12px;
     }
   }
 
