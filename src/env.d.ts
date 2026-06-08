@@ -9,12 +9,8 @@ type D1Database = {
   };
 };
 
-declare namespace App {
-  interface Locals {
-    runtime?: {
-      env?: {
-        DB?: D1Database;
-      };
-    };
-  }
+declare module "cloudflare:workers" {
+  export const env: {
+    DB?: D1Database;
+  };
 }
